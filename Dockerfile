@@ -9,6 +9,10 @@ ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/root/.cache/huggingface
 ENV TRANSFORMERS_CACHE=/root/.cache/huggingface
 
+# HuggingFace Token (required for gated models)
+ARG HF_TOKEN
+ENV HF_TOKEN=${HF_TOKEN}
+
 WORKDIR /app
 
 # System dependencies
@@ -28,17 +32,29 @@ RUN pip install --no-cache-dir --upgrade pip && \
     sentencepiece \
     protobuf \
     Pillow \
-    runpod
+    runpod \
+    huggingface_hub
+
+# Login to HuggingFace and download model
+RUN python3 -c "\
+import os; \
+from huggingface_hub import login; \
+token = os.environ.get('HF_TOKEN', ''); \
+if token: \
+    login(token=token); \
+    print('Logged in to HuggingFace'); \
+else: \
+    print('WARNING: No HF_TOKEN provided'); \
+"
 
 # ============================================
-# BAKE MODEL INTO IMAGE (Cold start = instant)
+# BAKE MODEL INTO IMAGE
 # ============================================
 RUN python3 -c "\
 import torch; \
 from diffusers import FluxPipeline; \
 print('='*50); \
 print('Downloading FLUX.1-Schnell model...'); \
-print('This will be baked into the Docker image'); \
 print('='*50); \
 pipe = FluxPipeline.from_pretrained( \
     'black-forest-labs/FLUX.1-schnell', \
