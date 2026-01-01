@@ -1,12 +1,12 @@
 # FLUX.1-Schnell RunPod Serverless Worker
-# Model BAKED-IN + Network Volume support
+# Model downloads at runtime using HF_TOKEN env var
 # Optimized for 24GB VRAM (RTX 4090, A10, L40S)
 
 FROM runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
-ENV HF_HOME=/root/.cache/huggingface
+ENV HF_HOME=/runpod-volume/huggingface
 
 WORKDIR /app
 
@@ -29,21 +29,6 @@ RUN pip install --no-cache-dir --upgrade pip && \
     Pillow \
     runpod \
     huggingface_hub
-
-# ============================================
-# LOGIN & DOWNLOAD MODEL (BAKED-IN)
-# ============================================
-RUN python3 -c "\
-from huggingface_hub import login; \
-import torch; \
-from diffusers import FluxPipeline; \
-login(token='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'); \
-print('='*50); \
-print('Downloading FLUX.1-Schnell...'); \
-pipe = FluxPipeline.from_pretrained('black-forest-labs/FLUX.1-schnell', torch_dtype=torch.bfloat16); \
-print('Model cached!'); \
-print('='*50); \
-"
 
 # Copy handler
 COPY handler.py /app/handler.py

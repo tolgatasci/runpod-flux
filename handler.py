@@ -1,8 +1,7 @@
 """
 FLUX.1-Schnell RunPod Serverless Handler
-- Model baked into Docker image
-- Network Volume support for faster loading
-- Optimized for 24GB VRAM
+Uses HF_TOKEN environment variable for authentication
+Model cached to Network Volume for fast subsequent loads
 """
 
 import os
@@ -18,42 +17,8 @@ pipe = None
 MODEL_LOADED = False
 
 
-def get_model_path():
-    """Get best model path - Network Volume > Baked-in cache"""
-    # Network Volume paths (faster NVMe)
-    volume_paths = [
-        "/runpod-volume/models/flux-schnell",
-        "/runpod-volume/flux-schnell",
-        "/workspace/models/flux-schnell"
-    ]
-
-    for path in volume_paths:
-        if os.path.exists(path) and os.path.isdir(path):
-            # Check if model files exist
-            if os.path.exists(os.path.join(path, "model_index.json")):
-                print(f"Found model in Network Volume: {path}")
-                return path
-
-    # Fallback to HuggingFace cache (baked into image)
-    return "black-forest-labs/FLUX.1-schnell"
-
-
-def save_to_volume(pipe):
-    """Save model to Network Volume for faster future loads"""
-    volume_path = "/runpod-volume/models/flux-schnell"
-
-    if os.path.exists("/runpod-volume") and not os.path.exists(volume_path):
-        try:
-            print(f"Saving model to Network Volume: {volume_path}")
-            os.makedirs(volume_path, exist_ok=True)
-            pipe.save_pretrained(volume_path)
-            print("Model saved to Network Volume!")
-        except Exception as e:
-            print(f"Could not save to volume: {e}")
-
-
 def load_model():
-    """Load FLUX.1-Schnell model with optimizations"""
+    """Load FLUX.1-Schnell model with HF_TOKEN auth"""
     global pipe, MODEL_LOADED
 
     if MODEL_LOADED and pipe is not None:
@@ -63,12 +28,29 @@ def load_model():
     print("FLUX.1-Schnell - Loading Model")
     print("=" * 60)
 
+    # Login with HF_TOKEN
+    hf_token = os.environ.get("HF_TOKEN")
+    if hf_token:
+        print("Logging in to HuggingFace...")
+        from huggingface_hub import login
+        login(token=hf_token)
+        print("Logged in successfully!")
+    else:
+        print("WARNING: No HF_TOKEN found!")
+
     start = time.time()
 
     from diffusers import FluxPipeline
 
-    model_path = get_model_path()
-    print(f"Loading from: {model_path}")
+    # Check Network Volume cache first
+    cache_path = "/runpod-volume/models/flux-schnell"
+
+    if os.path.exists(cache_path) and os.path.exists(os.path.join(cache_path, "model_index.json")):
+        print(f"Loading from Network Volume: {cache_path}")
+        model_path = cache_path
+    else:
+        print("Downloading from HuggingFace...")
+        model_path = "black-forest-labs/FLUX.1-schnell"
 
     pipe = FluxPipeline.from_pretrained(
         model_path,
@@ -78,22 +60,21 @@ def load_model():
     # Move to GPU
     pipe.to("cuda")
 
-    # Memory optimizations for 24GB
+    # Memory optimizations
     pipe.enable_attention_slicing(slice_size="auto")
-
-    # Try xformers
-    try:
-        pipe.enable_xformers_memory_efficient_attention()
-        print("xformers memory efficient attention enabled")
-    except Exception:
-        print("xformers not available, using default attention")
 
     elapsed = time.time() - start
     print(f"Model loaded in {elapsed:.1f}s")
 
     # Save to Network Volume for faster future loads
-    if model_path == "black-forest-labs/FLUX.1-schnell":
-        save_to_volume(pipe)
+    if model_path == "black-forest-labs/FLUX.1-schnell" and os.path.exists("/runpod-volume"):
+        try:
+            print(f"Caching model to: {cache_path}")
+            os.makedirs(cache_path, exist_ok=True)
+            pipe.save_pretrained(cache_path)
+            print("Model cached!")
+        except Exception as e:
+            print(f"Cache failed: {e}")
 
     print("=" * 60)
 
@@ -104,47 +85,26 @@ def load_model():
 def handler(job):
     """
     RunPod handler for FLUX.1-Schnell image generation
-
-    Input:
-        prompt: str - Image description
-        width: int - Image width (default: 1024, max: 1536)
-        height: int - Image height (default: 1024, max: 1536)
-        seed: int - Random seed (optional)
-        num_inference_steps: int - Steps (default: 4)
-        guidance: float - Guidance scale (default: 0.0)
-
-    Output:
-        image: str - Base64 encoded PNG
-        image_base64: str - Alias for compatibility
-        seed: int - Used seed
     """
     job_input = job.get("input", {})
 
-    # Extract parameters
     prompt = job_input.get("prompt", "A beautiful landscape")
     width = job_input.get("width", 1024)
     height = job_input.get("height", 1024)
     seed = job_input.get("seed")
-
-    # Schnell defaults
     num_inference_steps = job_input.get("num_inference_steps", 4)
     guidance_scale = job_input.get("guidance", job_input.get("guidance_scale", 0.0))
 
-    # Validate dimensions (divisible by 8)
+    # Validate dimensions
     width = (width // 8) * 8
     height = (height // 8) * 8
-
-    # Clamp for memory (24GB safe limits)
     width = max(256, min(width, 1536))
     height = max(256, min(height, 1536))
 
     print(f"\n{'='*60}")
-    print(f"FLUX.1-Schnell Generation Request")
-    print(f"{'='*60}")
-    print(f"Size: {width}x{height}")
-    print(f"Steps: {num_inference_steps}")
-    print(f"Guidance: {guidance_scale}")
-    print(f"Prompt: {prompt[:100]}...")
+    print(f"FLUX.1-Schnell Generation")
+    print(f"Size: {width}x{height}, Steps: {num_inference_steps}")
+    print(f"Prompt: {prompt[:80]}...")
 
     # Load model
     try:
@@ -183,7 +143,7 @@ def handler(job):
         image.save(buffered, format="PNG", optimize=True)
         image_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        print(f"Output: {len(image_base64) // 1024}KB base64")
+        print(f"Output: {len(image_base64) // 1024}KB")
         print(f"{'='*60}\n")
 
         return {
@@ -197,29 +157,29 @@ def handler(job):
 
     except torch.cuda.OutOfMemoryError:
         torch.cuda.empty_cache()
-        print("CUDA OOM - clearing cache")
-        return {"error": "Out of memory. Try smaller dimensions (max 1024x1024)."}
+        return {"error": "Out of memory. Try smaller dimensions."}
 
     except Exception as e:
         print(f"Generation error: {e}")
         return {"error": str(e)}
 
 
-# ============================================
-# WORKER STARTUP
-# ============================================
 if __name__ == "__main__":
     print("\n" + "=" * 60)
-    print("FLUX.1-Schnell RunPod Serverless Worker")
+    print("FLUX.1-Schnell RunPod Worker")
     print("=" * 60)
-    print("GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "Not available")
-    print("VRAM:", f"{torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB" if torch.cuda.is_available() else "N/A")
+
+    if torch.cuda.is_available():
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+        print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
+
+    hf_token = os.environ.get("HF_TOKEN")
+    print(f"HF_TOKEN: {'Set' if hf_token else 'NOT SET!'}")
     print("=" * 60 + "\n")
 
-    # Pre-load model for warm start
+    # Pre-load model
     print("Pre-loading model...")
     load_model()
     print("Worker ready!\n")
 
-    # Start RunPod handler
     runpod.serverless.start({"handler": handler})
