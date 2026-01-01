@@ -7,9 +7,8 @@ FROM runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/root/.cache/huggingface
-ENV TRANSFORMERS_CACHE=/root/.cache/huggingface
 
-# HuggingFace Token (required for gated models)
+# Build argument for HuggingFace token
 ARG HF_TOKEN
 ENV HF_TOKEN=${HF_TOKEN}
 
@@ -35,22 +34,14 @@ RUN pip install --no-cache-dir --upgrade pip && \
     runpod \
     huggingface_hub
 
-# Login to HuggingFace and download model
-RUN python3 -c "\
-import os; \
-from huggingface_hub import login; \
-token = os.environ.get('HF_TOKEN', ''); \
-if token: \
-    login(token=token); \
-    print('Logged in to HuggingFace'); \
-else: \
-    print('WARNING: No HF_TOKEN provided'); \
-"
-
 # ============================================
-# BAKE MODEL INTO IMAGE
+# LOGIN TO HUGGINGFACE & DOWNLOAD MODEL
 # ============================================
-RUN python3 -c "\
+RUN if [ -n "$HF_TOKEN" ]; then \
+        echo "Logging in to HuggingFace..."; \
+        python3 -c "from huggingface_hub import login; login(token='${HF_TOKEN}')"; \
+    fi && \
+    python3 -c "\
 import torch; \
 from diffusers import FluxPipeline; \
 print('='*50); \
@@ -60,10 +51,12 @@ pipe = FluxPipeline.from_pretrained( \
     'black-forest-labs/FLUX.1-schnell', \
     torch_dtype=torch.bfloat16 \
 ); \
-print('='*50); \
 print('Model cached successfully!'); \
 print('='*50); \
 "
+
+# Clear token from environment (security)
+ENV HF_TOKEN=""
 
 # Copy handler
 COPY handler.py /app/handler.py
