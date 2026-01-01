@@ -37,7 +37,7 @@ RUN python3 -c "\
 from huggingface_hub import login; \
 import torch; \
 from diffusers import FluxPipeline; \
-login(token='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'); \
+login(token='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'); \
 print('='*50); \
 print('Downloading FLUX.1-Schnell...'); \
 pipe = FluxPipeline.from_pretrained('black-forest-labs/FLUX.1-schnell', torch_dtype=torch.bfloat16); \
