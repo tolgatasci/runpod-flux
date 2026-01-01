@@ -8,10 +8,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/root/.cache/huggingface
 
-# Build argument for HuggingFace token
-ARG HF_TOKEN
-ENV HF_TOKEN=${HF_TOKEN}
-
 WORKDIR /app
 
 # System dependencies
@@ -35,31 +31,21 @@ RUN pip install --no-cache-dir --upgrade pip && \
     huggingface_hub
 
 # ============================================
-# LOGIN TO HUGGINGFACE & DOWNLOAD MODEL
+# LOGIN & DOWNLOAD MODEL (BAKED-IN)
 # ============================================
-RUN if [ -n "$HF_TOKEN" ]; then \
-        echo "Logging in to HuggingFace..."; \
-        python3 -c "from huggingface_hub import login; login(token='${HF_TOKEN}')"; \
-    fi && \
-    python3 -c "\
+RUN python3 -c "\
+from huggingface_hub import login; \
 import torch; \
 from diffusers import FluxPipeline; \
+login(token='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'); \
 print('='*50); \
-print('Downloading FLUX.1-Schnell model...'); \
-print('='*50); \
-pipe = FluxPipeline.from_pretrained( \
-    'black-forest-labs/FLUX.1-schnell', \
-    torch_dtype=torch.bfloat16 \
-); \
-print('Model cached successfully!'); \
+print('Downloading FLUX.1-Schnell...'); \
+pipe = FluxPipeline.from_pretrained('black-forest-labs/FLUX.1-schnell', torch_dtype=torch.bfloat16); \
+print('Model cached!'); \
 print('='*50); \
 "
-
-# Clear token from environment (security)
-ENV HF_TOKEN=""
 
 # Copy handler
 COPY handler.py /app/handler.py
 
-# Run handler
 CMD ["python3", "-u", "handler.py"]
