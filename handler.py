@@ -169,17 +169,20 @@ if __name__ == "__main__":
     print("FLUX.1-Schnell RunPod Worker")
     print("=" * 60)
 
-    if torch.cuda.is_available():
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
-        print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
+    try:
+        if torch.cuda.is_available():
+            print(f"GPU: {torch.cuda.get_device_name(0)}")
+            print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
+        else:
+            print("WARNING: CUDA not available!")
+    except Exception as e:
+        print(f"GPU check error: {e}")
 
     hf_token = os.environ.get("HF_TOKEN")
-    print(f"HF_TOKEN: {'Set' if hf_token else 'NOT SET!'}")
+    print(f"HF_TOKEN: {'Set (' + hf_token[:10] + '...)' if hf_token else 'NOT SET - WILL FAIL!'}")
     print("=" * 60 + "\n")
 
-    # Pre-load model
-    print("Pre-loading model...")
-    load_model()
-    print("Worker ready!\n")
-
+    # Start worker WITHOUT pre-loading (lazy load on first request)
+    # This allows the container to start even if model download fails
+    print("Starting worker (model will load on first request)...")
     runpod.serverless.start({"handler": handler})

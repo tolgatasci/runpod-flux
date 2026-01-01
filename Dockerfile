@@ -6,7 +6,7 @@ FROM runpod/pytorch:2.2.0-py3.10-cuda12.1.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
-ENV HF_HOME=/runpod-volume/huggingface
+ENV HF_HOME=/root/.cache/huggingface
 
 WORKDIR /app
 
